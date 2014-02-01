@@ -1,0 +1,136 @@
+<?xml version="1.0" ?>
+<project name="readybytes_clonning" basedir="." default="help" description="Ready Bytes Clonning Utils">
+
+	<target name="config" description="Load configuration file">
+		<property file="./global.prop" override="false"/>
+	</target>
+
+	<!-- fetch file list from s3 -->
+	<target name="s3list" description="Load configuration file" depends="config">
+		<echo msg="Listing backup stored at S3"/>
+		<exec command="php ${location.scripts}/s3sync.php LIST" />
+		<echo msg="...done."/>
+	</target>
+
+
+	<target name="setpermission" description="Setting up permission">
+		<echo msg="Setting up permission for folder ${location.websserver}/${location.domain}" />
+
+		<exec command="find ${location.websserver}/${location.domain} -type d -print0 | xargs -0 chmod 0755" />
+		<exec command="find ${location.websserver}/${location.domain} -type f -print0 | xargs -0 chmod 0664" />
+		<exec command="chown www-data:www-data -R ${location.websserver}/${location.domain}"/>
+	</target>
+
+	<target name="backup" depends="config" description="Backup website, so we can recover at any moment">
+		<echo msg="Backing up website located at [${location.websserver}/${location.domain}]" />
+		<!-- ("D M j G:i:s T Y"); // Sat Mar 10 17:16:18 MST 2001     --> 
+		<php expression="date('Y-M-j.D.G-i')" returnProperty="backup.date"/>
+
+		<!-- Create backup of files in recover folder -->
+                <mkdir dir="${location.backupstore}" />
+                <mkdir dir="${location.backupstore}/date-${backup.date}/" />
+
+		<tar destfile="${location.backupstore}/date-${backup.date}/files.tar.gz" compression="gzip">
+                        <fileset dir="${location.websserver}/${location.domain}">
+                                <include name="**/*.*" />
+                                <exclude name="**/*.jpa" />
+				<exclude name="cache/**" />
+				<exclude name="logs/**" />
+				<exclude name="tmp/**" />
+				<exclude name="*.log" />
+                        </fileset>
+                </tar>
+
+                <!-- Export  DB -->
+                <exec command="${sql.export.command} > ${location.backupstore}/date-${backup.date}/database.sql" />
+
+		<tar destfile="${location.backupstore}/date-${backup.date}/database.sql.tar.gz" compression="gzip">
+                        <fileset dir="${location.backupstore}/date-${backup.date}/">
+                                <include name="database.sql" />
+                        </fileset>
+                </tar>
+
+		<delete file="${location.backupstore}/date-${backup.date}/database.sql" />
+
+		<echo msg="Recovery date used was [${backup.date}], remember it"/>
+		<echo msg="You can recover using command [ phing recover -Drecover.date=${backup.date} ]"/>
+		
+		<copy todir="${location.backupstore}/date-${backup.date}">
+		  <filterchain>
+		    <expandproperties />
+		  </filterchain>
+
+		  <fileset dir="${location.scripts}">
+		    <include name="loadbackup.sh" />
+		  </fileset>
+		</copy>
+
+		<if>
+			<isset property="move.s3"/>
+			<then>
+				<echo msg="Moving to S3"/>
+				<exec command="php ${location.scripts}/s3sync.php PUT ${location.backupstore}/date-${backup.date}" />
+				<echo file="${location.backupstore}/latest-backup">${backup.date}</echo>
+                                <exec command="php /rbsl/scripts/aws/s3put.php ${location.backupstore}/latest-backup ${amazon.bucket} ${amazon.folder}/latest-backup " />
+                                <delete dir="${location.backupstore}/date-${backup.date}" includeemptydirs="true"/>
+				<echo msg="Moving to S3. Complete."/>
+			</then>
+			<else>
+				<echo msg="Moving to S3 was not requested" />
+			</else>
+		</if>
+
+	</target>
+
+	<target name="recover" depends="config" description="when liverun fails, use it to recover to backup of live" >
+		
+		<echo msg="Recovering site to [${location.websserver}/${location.domain}]"/>	
+		<echo msg="Recovery date [${recover.date}]"/>
+		<if>
+			<isset property="recover.date"/>
+			<then>
+				<echo msg="Recovery date is given as  [${recover.date}]"/>
+			</then>
+			<else>
+				<fail message="No recover.date provided" />
+			</else>
+		</if>
+
+		<if>
+			<isset property="from.s3"/>
+			<then>
+				<echo msg="Fetching from S3 ...[php ${location.scripts}/s3sync.php GET ${location.backupstore}/date-${recover.date}]"/>
+				<exec command="php ${location.scripts}/s3sync.php GET ${location.backupstore}/date-${recover.date}" />
+				<echo msg="Fetching complete."/>
+			</then>
+			<else>
+				<echo msg="If you wish to fetch it from S3, then append -Dfrom.s3=true to command" />
+			</else>
+		</if>
+
+		<available file="${location.backupstore}/date-${recover.date}/files.tar.gz" property="exist.files" value="true" />
+		<available file="${location.backupstore}/date-${recover.date}/database.sql.tar.gz" property="exist.database" value="true" />
+
+		<fail unless="exist.files" message="Files ${location.backupstore}/date-${recover.date}/files.tar.gz not found" />
+		<fail unless="exist.database" message="Database ${location.backupstore}/date-${recover.date}/database.sql.tar.gz not found" />
+
+		
+		<!-- UnTAR of files -->
+		<untar  file="${location.backupstore}/date-${recover.date}/files.tar.gz" 
+			todir="${location.websserver}/${location.domain}"
+			forceExtract="true"
+			/>
+
+		<untar  file="${location.backupstore}/date-${recover.date}/database.sql.tar.gz" 
+			todir="${location.backupstore}/date-${recover.date}"
+			forceExtract="true"
+			/>
+
+                <!-- IMPORT DB -->
+		<echo msg="Importing database ... [${sql.import.command} ${command.symbol.fileinput} ${location.backupstore}/date-${recover.date}/database.sql]" />
+                <exec command="${sql.import.command} ${command.symbol.fileinput} ${location.backupstore}/date-${recover.date}/database.sql" />
+		<echo msg="..... complete." />
+
+		<phingcall target="setpermission" />
+	</target>
+</project>

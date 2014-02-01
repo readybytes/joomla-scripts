@@ -1,0 +1,27 @@
+#### SQL #############
+db.host                 =localhost
+command.symbol.fileinput=<
+
+### Database Configuration ####
+db.name     =RBCONF_MYSQL_DB_NAME
+db.username =RBCONF_MYSQL_DB_USERNAME
+db.password =RBCONF_MYSQL_DB_PASSWORD
+
+#### SQL Commands ####
+sql.dbstring      = -u ${db.username} --password="${db.password}" ${db.name}
+sql.export.command= mysqldump --add-drop-table -h ${db.host} ${sql.dbstring} 
+sql.import.command= mysql -h ${db.host} ${sql.dbstring}
+
+
+### Locations ###
+location.domain      =RBCONF_DIGITAL_DOMAIN_FULL
+location.websserver  =RBCONF_DIGITAL_WEBSERVER_PATH
+location.scripts     =RBCONF_SCRIPT_PATH/backup
+location.backupstore =RBCONF_SCRIPT_PATH/backup/storage
+location.aws.script  =RBCONF_SCRIPT_PATH/backup/aws
+
+# S3 Communication
+amazon.key   =RBCONF_AWS_S3_ACCESS_KEY
+amazon.secret=RBCONF_AWS_S3_SECRET_KEY
+amazon.bucket=RBCONF_AWS_S3_BACKUP_BUCKET
+amazon.folder=RBCONF_AWS_S3_BACKUP_FOLDER
