@@ -1,7 +1,0 @@
-echo "To recover run following command."
-echo "pushd ${location.scripts} ; phing -f backup.xml recover -Drecover.date=${backup.date} ; popd"
-
-echo "Warning ::: "
-echo " "
-echo " "
-echo " This will overwrite without backing up the website. You should always backup before recovering."
